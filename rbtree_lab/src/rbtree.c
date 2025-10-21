@@ -137,7 +137,7 @@ node_t *rbtree_insert(rbtree *t, const key_t key) {
   new_node -> key = key;
   new_node -> left = t -> nil;
   new_node -> right = t -> nil;
-  new_node -> color = RBTREE_RED;
+  new_node -> color = RBTREE_RED; // 새로 삽입되는 노드의 색은 빨간색
 
   node_t *root_node = t -> nil;
   node_t *node_next = t -> root;
@@ -160,7 +160,7 @@ node_t *rbtree_insert(rbtree *t, const key_t key) {
     root_node -> right = new_node;
   }
   rbtree_insert_fix(t, new_node);
-  return t->root;
+  return new_node;
 }
 
 node_t *rbtree_find(const rbtree *t, const key_t key) {
@@ -213,9 +213,150 @@ node_t *rbtree_max(const rbtree *t) {
   }
   return curNode;
 }
+/* 
+  복구 시작: 균형을 맞추기 위해, 삭제된 자리로 온 노드의 '형제' 노드 상태를 살핀다.
+  (복구-1): 형제가 빨간색이면, 색을 바꾸고 회전시켜 '형제가 검은색인 상황'으로 만든 뒤 다시 확인한다.
+  (복구-2): 형제와 그 자식까지 모두 검은색이면, 형제만 빨간색으로 바꾸고 문제는 '부모'에게 넘겨서 위에서부터 다시 시작한다.
+  (복구-3): 형제의 '안쪽' 자식만 빨간색이면, 회전시켜 '바깥쪽' 자식이 빨간색인 상황(아래 4번)으로 바꾼다.
+  (복구-4): 형제의 '바깥쪽' 자식이 빨간색이면, 최종적으로 색을 조정하고 회전하여 문제를 완전히 해결하고 복구를 끝낸다.
+  마무리: 모든 과정이 끝나면, 혹시 모르니 루트 노드가 검은색인지 다시 한번 확인하고 맞춘다.
+*/
+void rbtree_erase_fix(rbtree *t, node_t *x) {
+  while(x != t->root && x->color == RBTREE_BLACK) {
+    // x가 부모 왼쪽 -> 형제는 부모 오른쪽
+    if(x == x -> parent -> left) {
+      node_t *bro = x -> parent -> right; // bro
+
+      // case 1 : 형제가 빨간색 -> 부모, 형제 색 교체 + 부모기준 회전
+      if (bro->color == RBTREE_RED) {
+        bro->parent->color = RBTREE_RED;
+        bro->color = RBTREE_BLACK;
+        left_rotate(t, x->parent);
+        bro = x -> parent -> right;
+      }
+      // case 2 : 형제 블랙 + 형제 자식 왼,오 다 블랙 -> 형제 색 바꿔주기
+      if(bro->left->color == RBTREE_BLACK && bro->right->color == RBTREE_BLACK) {
+        bro->color = RBTREE_RED;
+        x = x -> parent;
+      } else {
+        // case 3 : 형제 블랙, 형제의 오른쪽 블랙, 왼쪽 레드 -> 형제 기준 회전
+        if(bro->right->color == RBTREE_BLACK) {
+          bro->left->color = RBTREE_BLACK;
+          bro->color = RBTREE_RED;
+          right_rotate(t, bro);
+          bro = x -> parent -> right;
+        }
+        // case 4 : 형제 블랙 -> 형제 오른쪽 자식 레드 -> 색 조정 후 부모기준 회전
+        bro -> color = x -> parent -> color;
+        x -> parent -> color = RBTREE_BLACK;
+        bro -> right -> color = RBTREE_BLACK;
+        left_rotate(t, x->parent);
+        x = t -> root;
+      }
+    }
+   else {
+     node_t *bro = x->parent->left;  // 형제 노드
+
+      // CASE 1 (대칭)
+      if (bro->color == RBTREE_RED) {
+        bro->color = RBTREE_BLACK;
+        x->parent->color = RBTREE_RED;
+        right_rotate(t, x->parent);
+        bro = x->parent->left;
+      }
+      //  CASE 2 (대칭)
+      if (bro->right->color == RBTREE_BLACK && bro->left->color == RBTREE_BLACK) {
+        bro->color = RBTREE_RED;
+        x = x->parent;
+      }
+      else {
+        //  CASE 3 (대칭)
+        if (bro->left->color == RBTREE_BLACK) {
+          bro->right->color = RBTREE_BLACK;
+          bro->color = RBTREE_RED;
+          left_rotate(t, bro);
+          bro = x->parent->left;
+        }
+        //  CASE 4 (대칭)
+        bro->color = x->parent->color;
+        x->parent->color = RBTREE_BLACK;
+        bro->left->color = RBTREE_BLACK;
+        right_rotate(t, x->parent);
+        x = t->root;
+      }
+    }
+  }
+  x -> color = RBTREE_BLACK;
+}
+
+// 후계자는 삭제될 노드보다 큰 값중 가장 작은 값 -> 한번 오른쪽 -> 이후 제일 왼쪽
+node_t *rbtree_successor(rbtree *t, node_t *p) {
+  node_t *curNode = p -> right;
+  while ((curNode -> left != t -> nil))
+  {
+    curNode = curNode -> left;
+  }
+  return curNode;
+}
+
+// 트리 t에서 노드 u의 자리를 노드 v로 대체하는 함수
+void rbtree_transplant(rbtree *t, node_t *u, node_t *v) {
+  if(u -> parent == t -> nil) {
+    t -> root = v;
+  } else if (u == u->parent->left) {
+    u -> parent -> left = v;
+  } else {
+    u -> parent -> right = v;
+  }
+  v -> parent = u -> parent;
+}
 
 int rbtree_erase(rbtree *t, node_t *p) {
   // TODO: implement erase
+  // - tree_erase(tree, ptr): RB tree 내부의 ptr로 지정된 node를 삭제하고 메모리 반환
+  /*
+  단순화: 삭제할 노드의 자식이 2개면, '후계자' 노드의 값을 대신 채우고 그 후계자를 삭제 대상으로 바꾼다. 
+  연결 끊기: 이제 자식이 최대 1개인 삭제 대상을 트리에서 빼내고, 있던 자식으로 그 자리를 메꾼다.      
+  문제 확인: 삭제된 노드의 원래 색이 검은색이었다면, Black Height 균형이 깨졌으므로 복구 작업을 시작한다. (빨간색이었다면 여기서 끝!)
+  메모리 해제: 진짜 삭제 대상이었던 노드를 메모리에서 완전히 해제한다.
+  */
+  // 여기엔 그냥 bst 노드 삭제 로직 => 마지막에 수정 함수 호출
+  node_t *eraseNode = p; // 삭제 될 노드 y
+  node_t *shiftNode; // 그 자리 채울 노드 x
+  color_t eraseNodeOriginColor = eraseNode -> color;
+  // 왼쪽 자녀가 없을 때
+  if(p -> left == t -> nil) {
+    shiftNode = p -> right;
+    rbtree_transplant(t, p, p -> right);
+  } // 오른쪽 자녀가 없을때
+  else if(p -> right == t -> nil) {
+    shiftNode = p -> left;
+    rbtree_transplant(t, p, p -> left);
+  } // 자녀가 양쪽 다 있을 때
+  else {
+    eraseNode = rbtree_successor(t, p);
+    eraseNodeOriginColor = eraseNode -> color;
+    // shiftNode 는 후계자의 오른쪽 자식 (후계자는 왼쪽 끝까지 내려와서 후계자의 left는 항상 nil)
+    shiftNode = eraseNode -> right;
+
+    if(eraseNode -> parent == p) {
+      shiftNode -> parent = eraseNode;
+    } else {
+      rbtree_transplant(t, eraseNode, eraseNode -> right);
+      eraseNode -> right = p -> right;
+      eraseNode -> right -> parent = eraseNode;
+    }
+    rbtree_transplant(t,p, eraseNode);
+
+    eraseNode -> left = p -> left;
+    eraseNode -> left -> parent = eraseNode;
+
+    eraseNode -> color = p -> color;
+  }
+  if(eraseNodeOriginColor == RBTREE_BLACK) {
+    rbtree_erase_fix(t, shiftNode);
+  }
+  free(p);
   return 0;
 }
 
